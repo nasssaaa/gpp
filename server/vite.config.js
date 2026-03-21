@@ -6,6 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5175,
+    allowedHosts: [
+      'wh1234567.com',
+      'www.wh1234567.com'
+    ],
+    host: '0.0.0.0',
     proxy: {
       '/api': {
         target: 'https://i.jzj9999.com',
