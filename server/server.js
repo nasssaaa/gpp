@@ -28,6 +28,20 @@ if (!fs.existsSync(pubFile) || !fs.existsSync(keyFile)) {
 const privateKey = fs.readFileSync(keyFile, 'utf8');
 const AUTH_SECRET = "GOLD_ADMIN_TOKEN_123";
 
+// Restoring saved markups on boot to persist through crashes/restarts
+const dataFile = 'markups.json';
+if (fs.existsSync(dataFile)) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    markups.buy = saved.buy || 0;
+    markups.sell = saved.sell || 0;
+  } catch(e) { console.error('Failed to load markups.json'); }
+}
+
+function saveMarkups() {
+  fs.writeFileSync(dataFile, JSON.stringify(markups));
+}
+
 const adminClients = new Set();
 const sseClients = new Set();
 
@@ -47,9 +61,10 @@ function broadcastAdminState() {
 }
 
 function broadcastMarkupToWeb() {
-  const payload = `data: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`;
+  const payloadJSON = JSON.stringify({ type: 'MARKUP_UPDATE', ...markups });
+  const streamData = `event: message\ndata: ${payloadJSON}\n\n`;
   for (const res of sseClients) {
-    res.write(payload);
+    res.write(streamData);
   }
 }
 
@@ -60,11 +75,14 @@ const httpServer = http.createServer((req, res) => {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no' // Instruct edge proxies routing this port to immediately flush the SSE buffers securely
     });
+    res.flushHeaders(); // Strictly force Node process stream buffers open
     sseClients.add(res);
-    // Transmit initialization
-    res.write(`data: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`);
+    
+    // Transmit initial data
+    res.write(`event: message\ndata: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`);
     req.on('close', () => sseClients.delete(res));
   } else {
     res.writeHead(404);
@@ -109,6 +127,9 @@ const tcpServer = net.createServer((socket) => {
           if (typeof msg.buy === 'number') markups.buy = msg.buy;
           if (typeof msg.sell === 'number') markups.sell = msg.sell;
           console.log(`[TCP Admin] Settings updated: Buy +${markups.buy}, Sell +${markups.sell}`);
+          
+          saveMarkups();
+          
           broadcastAdminState();
           broadcastMarkupToWeb();
         }

@@ -1,5 +1,5 @@
 {
-  "tcpHost": "127.0.0.1",
-  "tcpPort": 8082,
+  "tcpHost": "frp-hub.com",
+  "tcpPort": 15461,
   "pubKeyPath": "./server.pub"
 }
