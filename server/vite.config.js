@@ -1,5 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'fs'
+
+const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'))
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -12,6 +15,10 @@ export default defineConfig({
     ],
     host: '0.0.0.0',
     proxy: {
+      '/events': {
+        target: `http://127.0.0.1:${config.ssePort || 8081}`,
+        changeOrigin: true
+      },
       '/api': {
         target: 'https://i.jzj9999.com',
         changeOrigin: true,

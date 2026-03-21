@@ -10,15 +10,10 @@ function App() {
 
   // SSE Connection for Markups
   useEffect(() => {
-    const sseHost = config.tcpHost || '127.0.0.1'; // Fallback utilizing the config param
-    const ssePort = config.ssePort || 8081;
+    // Utilizing relative paths allows the browser to natively inherit the https:// protocol and host, completely bypassing Mixed Content blocks!
+    let eventSource = new EventSource(`/events`);
     
-    // Automatically fall back to current browser hostname if configured to localhost or localhost alias
-    const targetHost = (sseHost === 'localhost' || sseHost === '0.0.0.0' || sseHost === '127.0.0.1') ? window.location.hostname : sseHost;
-    
-    let eventSource = new EventSource(`http://${targetHost}:${ssePort}/events`);
-    
-    eventSource.onopen = () => console.log('Connected to Markup SSE.');
+    eventSource.onopen = () => console.log('Connected to Markup SSE over relative origin.');
     
     eventSource.onmessage = (event) => {
       try {
