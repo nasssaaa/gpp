@@ -1,4 +1,4 @@
-const WebSocket = require('ws');
+const net = require('net');
 const readline = require('readline');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -35,9 +35,9 @@ try {
   process.exit(1);
 }
 
-const wsHost = config.wsHost || 'localhost';
-const wsPort = config.wsPort || 8080;
-const ws = new WebSocket(`ws://${wsHost}:${wsPort}`);
+const tcpHost = config.tcpHost || '127.0.0.1';
+const tcpPort = config.tcpPort || 8082;
+const client = new net.Socket();
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -58,7 +58,7 @@ function renderDashboard() {
   if (!isConnected) return;
   console.clear();
   console.log('=========================================');
-  console.log('      金价调节终端 / MARKUP ADMIN        ');
+  console.log('      TCP 金价调节终端 / MARKUP ADMIN        ');
   console.log('=========================================');
   
   const formatM = (m) => m >= 0 ? `+${m}` : `${m}`;
@@ -81,39 +81,50 @@ function renderDashboard() {
   }
 }
 
-ws.on('open', function open() {
-  ws.send(JSON.stringify({ type: 'AUTH', token: encryptedToken }));
+let buffer = '';
+
+client.connect(tcpPort, tcpHost, () => {
+  client.write(JSON.stringify({ type: 'AUTH', token: encryptedToken }) + '\n');
 });
 
-ws.on('message', function message(data) {
-  const msg = JSON.parse(data);
+client.on('data', (data) => {
+  buffer += data.toString();
+  const msgs = buffer.split('\n');
+  buffer = msgs.pop();
   
-  if (msg.type === 'AUTH_SUCCESS') {
-    isConnected = true;
-    renderDashboard();
-    rl.prompt();
-  } else if (msg.type === 'AUTH_FAIL') {
-    console.clear();
-    console.error(`\n[!] 验证失败: 密钥不正确 (${msg.reason})\n`);
-    process.exit(1);
-  } else if (msg.type === 'ADMIN_STATE') {
-    state.baseBuy = msg.baseBuy;
-    state.baseSell = msg.baseSell;
-    state.buyMarkup = msg.buyMarkup;
-    state.sellMarkup = msg.sellMarkup;
-    
-    renderDashboard();
-    rl.prompt(true);
+  for (const msgString of msgs) {
+    if (!msgString.trim()) continue;
+    try {
+      const msg = JSON.parse(msgString);
+      
+      if (msg.type === 'AUTH_SUCCESS') {
+        isConnected = true;
+        renderDashboard();
+        rl.prompt();
+      } else if (msg.type === 'AUTH_FAIL') {
+        console.clear();
+        console.error(`\n[!] 验证失败: 密钥不正确 (${msg.reason})\n`);
+        process.exit(1);
+      } else if (msg.type === 'ADMIN_STATE') {
+        state.baseBuy = msg.baseBuy;
+        state.baseSell = msg.baseSell;
+        state.buyMarkup = msg.buyMarkup;
+        state.sellMarkup = msg.sellMarkup;
+        
+        renderDashboard();
+        rl.prompt(true);
+      }
+    } catch(e) {}
   }
 });
 
-ws.on('close', () => {
-  console.log('\n[!] 与服务器连接断开。');
+client.on('close', () => {
+  console.log('\n[!] 与服务器 TCP 连接断开。');
   process.exit(1);
 });
 
-ws.on('error', (e) => {
-  console.error(`\n[!] 网络错误: 无法连接到服务器 ${wsHost}:${wsPort}。`, e.message);
+client.on('error', (e) => {
+  console.error(`\n[!] TCP 网络错误: 无法连接到服务器 ${tcpHost}:${tcpPort}。`, e.message);
   process.exit(1);
 });
 
@@ -122,8 +133,8 @@ rl.on('line', (line) => {
   
   if (input === 'exit' || input === 'quit') {
     console.clear();
-    console.log('已退出管理员终端程序。\n');
-    ws.close();
+    console.log('已退出 TCP 管理员控制台。\n');
+    client.destroy();
     process.exit(0);
   }
   
@@ -134,7 +145,7 @@ rl.on('line', (line) => {
     
     if (!isNaN(val) && (type === 'buy' || type === 'sell')) {
       const payload = { type: 'SET_MARKUP', [type]: val };
-      ws.send(JSON.stringify(payload));
+      client.write(JSON.stringify(payload) + '\n');
       return; 
     } else {
       errorMsg = '格式错误! 请输入例如 "buy 5" 或 "sell -2"';

@@ -1,3 +1,4 @@
 {
-  "wsPort": 8081
+  "tcpPort": 8082,
+  "ssePort": 8081
 }

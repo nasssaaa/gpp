@@ -1,11 +1,12 @@
-import { WebSocketServer } from 'ws';
+import net from 'net';
+import http from 'http';
 import fs from 'fs';
 import crypto from 'crypto';
 import https from 'https';
 
 const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'));
-const port = config.wsPort || 8080;
-const wss = new WebSocketServer({ port });
+const tcpPort = config.tcpPort || 8082;
+const httpPort = config.ssePort || 8081;
 
 let markups = { buy: 0, sell: 0 };
 let basePrices = { buy: 0, sell: 0 };
@@ -13,7 +14,7 @@ let basePrices = { buy: 0, sell: 0 };
 const pubFile = 'server.pub';
 const keyFile = 'server.key';
 
-// Auto-generate keys in current directory natively
+// Auto-generate keys in current directory
 if (!fs.existsSync(pubFile) || !fs.existsSync(keyFile)) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
     modulusLength: 2048,
@@ -26,6 +27,101 @@ if (!fs.existsSync(pubFile) || !fs.existsSync(keyFile)) {
 
 const privateKey = fs.readFileSync(keyFile, 'utf8');
 const AUTH_SECRET = "GOLD_ADMIN_TOKEN_123";
+
+const adminClients = new Set();
+const sseClients = new Set();
+
+function broadcastAdminState() {
+  const payload = JSON.stringify({
+    type: 'ADMIN_STATE',
+    baseBuy: basePrices.buy,
+    baseSell: basePrices.sell,
+    buyMarkup: markups.buy,
+    sellMarkup: markups.sell
+  }) + '\n';
+  for (const client of adminClients) {
+    if (client.isAuthenticatedAdmin && !client.destroyed) {
+      client.write(payload);
+    }
+  }
+}
+
+function broadcastMarkupToWeb() {
+  const payload = `data: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`;
+  for (const res of sseClients) {
+    res.write(payload);
+  }
+}
+
+// 1. HTTP Server for Browser SSE Stream
+const httpServer = http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (req.url === '/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    });
+    sseClients.add(res);
+    // Transmit initialization
+    res.write(`data: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`);
+    req.on('close', () => sseClients.delete(res));
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
+httpServer.listen(httpPort, () => console.log(`HTTP SSE Server (Frontend Stream) running on port ${httpPort}`));
+
+// 2. Pure TCP Server for Admin CLI
+const tcpServer = net.createServer((socket) => {
+  socket.isAuthenticatedAdmin = false;
+  socket.buffer = '';
+
+  socket.on('data', (data) => {
+    socket.buffer += data.toString();
+    const msgs = socket.buffer.split('\n');
+    socket.buffer = msgs.pop();
+    
+    for (const msgString of msgs) {
+      if (!msgString.trim()) continue;
+      try {
+        const msg = JSON.parse(msgString);
+        
+        if (msg.type === 'AUTH') {
+          try {
+            const decrypted = crypto.privateDecrypt(privateKey, Buffer.from(msg.token, 'base64')).toString();
+            if (decrypted === AUTH_SECRET) {
+              socket.isAuthenticatedAdmin = true;
+              adminClients.add(socket);
+              socket.write(JSON.stringify({ type: 'AUTH_SUCCESS' }) + '\n');
+              broadcastAdminState();
+            } else {
+              socket.write(JSON.stringify({ type: 'AUTH_FAIL', reason: '密钥不正确' }) + '\n');
+              socket.destroy();
+            }
+          } catch(e) {
+            socket.write(JSON.stringify({ type: 'AUTH_FAIL', reason: '非对称加密解码失败，公钥不匹配' }) + '\n');
+            socket.destroy();
+          }
+        } 
+        else if (msg.type === 'SET_MARKUP' && socket.isAuthenticatedAdmin) {
+          if (typeof msg.buy === 'number') markups.buy = msg.buy;
+          if (typeof msg.sell === 'number') markups.sell = msg.sell;
+          console.log(`[TCP Admin] Settings updated: Buy +${markups.buy}, Sell +${markups.sell}`);
+          broadcastAdminState();
+          broadcastMarkupToWeb();
+        }
+      } catch (e) {
+        console.error("Invalid TCP message format", e);
+      }
+    }
+  });
+
+  socket.on('close', () => adminClients.delete(socket));
+  socket.on('error', () => adminClients.delete(socket));
+});
+tcpServer.listen(tcpPort, () => console.log(`TCP Native Server (Admin API) running on port ${tcpPort}`));
 
 // Poll the JZJ API
 setInterval(() => {
@@ -45,68 +141,3 @@ setInterval(() => {
     });
   }).on('error', () => {});
 }, 500);
-
-function broadcastAdminState() {
-  const payload = JSON.stringify({
-    type: 'ADMIN_STATE',
-    baseBuy: basePrices.buy,
-    baseSell: basePrices.sell,
-    buyMarkup: markups.buy,
-    sellMarkup: markups.sell
-  });
-  wss.clients.forEach(client => {
-    if (client.readyState === 1 && client.isAuthenticatedAdmin) {
-      client.send(payload);
-    }
-  });
-}
-
-function broadcastMarkupToWeb() {
-  const payload = JSON.stringify({ type: 'MARKUP_UPDATE', ...markups });
-  wss.clients.forEach(client => {
-    if (client.readyState === 1 && !client.isAuthenticatedAdmin) {
-      client.send(payload);
-    }
-  });
-}
-
-wss.on('connection', function connection(ws) {
-  ws.isAuthenticatedAdmin = false;
-  ws.send(JSON.stringify({ type: 'MARKUP_UPDATE', ...markups }));
-
-  ws.on('message', function message(data) {
-    try {
-      const msg = JSON.parse(data);
-      
-      if (msg.type === 'AUTH') {
-        try {
-          const decrypted = crypto.privateDecrypt(privateKey, Buffer.from(msg.token, 'base64')).toString();
-          if (decrypted === AUTH_SECRET) {
-            ws.isAuthenticatedAdmin = true;
-            ws.send(JSON.stringify({ type: 'AUTH_SUCCESS' }));
-            broadcastAdminState();
-          } else {
-            ws.send(JSON.stringify({ type: 'AUTH_FAIL', reason: '密钥不正确' }));
-            ws.close();
-          }
-        } catch(e) {
-          ws.send(JSON.stringify({ type: 'AUTH_FAIL', reason: '非对称加密解码失败，公钥不匹配' }));
-          ws.close();
-        }
-      } 
-      else if (msg.type === 'SET_MARKUP' && ws.isAuthenticatedAdmin) {
-        if (typeof msg.buy === 'number') markups.buy = msg.buy;
-        if (typeof msg.sell === 'number') markups.sell = msg.sell;
-        
-        console.log(`[Admin] Settings updated: Buy +${markups.buy}, Sell +${markups.sell}`);
-        
-        broadcastAdminState();
-        broadcastMarkupToWeb();
-      }
-    } catch (e) {
-      console.error("Invalid message format", e);
-    }
-  });
-});
-
-console.log(`WebSocket secure server running on port ${port}`);

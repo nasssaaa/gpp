@@ -8,30 +8,30 @@ function App() {
   const [markups, setMarkups] = useState({ buy: 0, sell: 0 });
   const prevDataRef = useRef(null);
 
-  // WebSocket Connection for Markups
+  // SSE Connection for Markups
   useEffect(() => {
-    const wsHost = config.wsHost || 'localhost';
-    const wsPort = config.wsPort || 8080;
+    const sseHost = config.tcpHost || '127.0.0.1'; // Fallback utilizing the config param
+    const ssePort = config.ssePort || 8081;
     
-    // Automatically fall back to current browser hostname if configured to localhost, protecting mobile users accessing remotely
-    const targetHost = wsHost === 'localhost' ? window.location.hostname : wsHost;
+    // Automatically fall back to current browser hostname if configured to localhost or localhost alias
+    const targetHost = (sseHost === 'localhost' || sseHost === '0.0.0.0' || sseHost === '127.0.0.1') ? window.location.hostname : sseHost;
     
-    let ws = new WebSocket(`ws://${targetHost}:${wsPort}`);
+    let eventSource = new EventSource(`http://${targetHost}:${ssePort}/events`);
     
-    ws.onopen = () => console.log('Connected to Markup WS.');
+    eventSource.onopen = () => console.log('Connected to Markup SSE.');
     
-    ws.onmessage = (event) => {
+    eventSource.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'MARKUP_UPDATE') {
            setMarkups({ buy: msg.buy, sell: msg.sell });
         }
-      } catch(e) { console.error('WS Parse error', e); }
+      } catch(e) { console.error('SSE Parse error', e); }
     };
 
-    ws.onclose = () => console.log('Markup WS closed.');
+    eventSource.onerror = () => console.log('Markup SSE connection lost.');
     
-    return () => { ws.close(); };
+    return () => { eventSource.close(); };
   }, []);
 
   // API Polling Loop
