@@ -1,0 +1,5 @@
+{
+  "wsHost": "localhost",
+  "wsPort": 8080,
+  "pubKeyPath": "./server.pub"
+}

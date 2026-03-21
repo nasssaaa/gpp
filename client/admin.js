@@ -1,0 +1,148 @@
+const WebSocket = require('ws');
+const readline = require('readline');
+const fs = require('fs');
+const crypto = require('crypto');
+const path = require('path');
+
+const configPath = path.join(process.cwd(), 'config.json');
+if (!fs.existsSync(configPath)) {
+  console.error(`错误: 找不到配置文件 ${configPath}`);
+  process.exit(1);
+}
+
+const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+const pubFile = path.resolve(process.cwd(), config.pubKeyPath || 'server.pub');
+const AUTH_SECRET = "GOLD_ADMIN_TOKEN_123";
+
+if (!fs.existsSync(pubFile)) {
+  console.error(`错误: 缺少公钥文件 (${pubFile})，无法验证身份！请在 config.json 检查 pubKeyPath 路径是否正确。`);
+  process.exit(1);
+}
+
+let publicKey;
+try {
+  publicKey = fs.readFileSync(pubFile, 'utf8');
+} catch (e) {
+  console.error("错误: 读取公钥文件失败！");
+  process.exit(1);
+}
+
+let encryptedToken;
+try {
+  encryptedToken = crypto.publicEncrypt(publicKey, Buffer.from(AUTH_SECRET)).toString('base64');
+} catch (e) {
+  console.error("错误: 密钥不正确或公钥格式无效！无法加密验证信息。");
+  process.exit(1);
+}
+
+const wsHost = config.wsHost || 'localhost';
+const wsPort = config.wsPort || 8080;
+const ws = new WebSocket(`ws://${wsHost}:${wsPort}`);
+
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout,
+  prompt: 'Admin > '
+});
+
+let state = {
+  baseBuy: 0,
+  baseSell: 0,
+  buyMarkup: 0,
+  sellMarkup: 0
+};
+let errorMsg = '';
+let isConnected = false;
+
+function renderDashboard() {
+  if (!isConnected) return;
+  console.clear();
+  console.log('=========================================');
+  console.log('      金价调节终端 / MARKUP ADMIN        ');
+  console.log('=========================================');
+  
+  const formatM = (m) => m >= 0 ? `+${m}` : `${m}`;
+  const buyStr = `${state.baseBuy.toFixed(2)}(${formatM(state.buyMarkup)})`;
+  const sellStr = `${state.baseSell.toFixed(2)}(${formatM(state.sellMarkup)})`;
+  
+  console.log(`\n  [ 回购 / Buyback ] :  ${buyStr}`);
+  console.log(`  [ 销售 / Sales ]   :  ${sellStr}\n`);
+  console.log('=========================================');
+  console.log('指令说明 (Commands):');
+  console.log('  buy <数值>  (例: "buy 5.5" 或 "buy -2")');
+  console.log('  sell <数值> (例: "sell 3.2")');
+  console.log('  exit        (退出控制台)');
+  console.log('=========================================');
+  if (errorMsg) {
+    console.log(`\n[!] ${errorMsg}`);
+    errorMsg = '';
+  } else {
+    console.log('\n');
+  }
+}
+
+ws.on('open', function open() {
+  ws.send(JSON.stringify({ type: 'AUTH', token: encryptedToken }));
+});
+
+ws.on('message', function message(data) {
+  const msg = JSON.parse(data);
+  
+  if (msg.type === 'AUTH_SUCCESS') {
+    isConnected = true;
+    renderDashboard();
+    rl.prompt();
+  } else if (msg.type === 'AUTH_FAIL') {
+    console.clear();
+    console.error(`\n[!] 验证失败: 密钥不正确 (${msg.reason})\n`);
+    process.exit(1);
+  } else if (msg.type === 'ADMIN_STATE') {
+    state.baseBuy = msg.baseBuy;
+    state.baseSell = msg.baseSell;
+    state.buyMarkup = msg.buyMarkup;
+    state.sellMarkup = msg.sellMarkup;
+    
+    renderDashboard();
+    rl.prompt(true);
+  }
+});
+
+ws.on('close', () => {
+  console.log('\n[!] 与服务器连接断开。');
+  process.exit(1);
+});
+
+ws.on('error', (e) => {
+  console.error(`\n[!] 网络错误: 无法连接到服务器 ${wsHost}:${wsPort}。`, e.message);
+  process.exit(1);
+});
+
+rl.on('line', (line) => {
+  const input = line.trim().toLowerCase();
+  
+  if (input === 'exit' || input === 'quit') {
+    console.clear();
+    console.log('已退出管理员终端程序。\n');
+    ws.close();
+    process.exit(0);
+  }
+  
+  const parts = input.split(' ');
+  if (parts.length === 2) {
+    const type = parts[0];
+    const val = parseFloat(parts[1]);
+    
+    if (!isNaN(val) && (type === 'buy' || type === 'sell')) {
+      const payload = { type: 'SET_MARKUP', [type]: val };
+      ws.send(JSON.stringify(payload));
+      return; 
+    } else {
+      errorMsg = '格式错误! 请输入例如 "buy 5" 或 "sell -2"';
+    }
+  } else if (input !== '') {
+    errorMsg = '未知指令 (输入 exit 退出)!';
+  }
+  
+  renderDashboard();
+  rl.prompt();
+});

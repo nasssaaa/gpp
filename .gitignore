@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-ssr
+*.local
+.eslintcache
+admin.exe
+*.key
+*.pub
+.env
+.env.*
