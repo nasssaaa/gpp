@@ -3,6 +3,13 @@ import http from 'http';
 import fs from 'fs';
 import crypto from 'crypto';
 import https from 'https';
+import express from 'express';
+import { createProxyMiddleware } from 'http-proxy-middleware';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'));
 const tcpPort = config.tcpPort || 8082;
@@ -68,28 +75,46 @@ function broadcastMarkupToWeb() {
   }
 }
 
-// 1. HTTP Server for Browser SSE Stream
-const httpServer = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  if (req.url === '/events') {
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no' // Instruct edge proxies routing this port to immediately flush the SSE buffers securely
-    });
-    res.flushHeaders(); // Strictly force Node process stream buffers open
-    sseClients.add(res);
-    
-    // Transmit initial data
-    res.write(`event: message\ndata: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`);
-    req.on('close', () => sseClients.delete(res));
-  } else {
-    res.writeHead(404);
-    res.end();
+// 1. HTTP Server for Browser SSE Stream + Static Files + API Proxy
+const app = express();
+
+// A. Proxy /api requests
+app.use('/api', createProxyMiddleware({
+  target: 'https://i.jzj9999.com',
+  changeOrigin: true,
+  pathRewrite: { '^/api': '' },
+  onProxyReq: (proxyReq) => {
+    proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    proxyReq.setHeader('Referer', 'https://i.jzj9999.com/');
+    proxyReq.setHeader('Host', 'i.jzj9999.com');
   }
+}));
+
+// B. SSE Subscription Endpoint
+app.get('/events', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no'
+  });
+  res.flushHeaders();
+  sseClients.add(res);
+  res.write(`event: message\ndata: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`);
+  req.on('close', () => sseClients.delete(res));
 });
-httpServer.listen(httpPort, () => console.log(`HTTP SSE Server (Frontend Stream) running on port ${httpPort}`));
+
+// C. Serve static files from Vite build (dist)
+app.use(express.static(path.join(__dirname, 'dist')));
+
+// D. SPA Routing Fallback
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
+
+const httpServer = http.createServer(app);
+httpServer.listen(httpPort, () => console.log(`HTTP Server (Static + SSE + Proxy) running on port ${httpPort}`));
 
 // 2. Pure TCP Server for Admin CLI
 const tcpServer = net.createServer((socket) => {
