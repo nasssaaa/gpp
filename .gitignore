@@ -8,3 +8,4 @@ admin.exe
 *.pub
 .env
 .env.*
+markups.json

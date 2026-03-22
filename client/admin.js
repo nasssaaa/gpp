@@ -60,17 +60,17 @@ function renderDashboard() {
   console.log('=========================================');
   console.log('      TCP 金价调节终端 / MARKUP ADMIN        ');
   console.log('=========================================');
-  
+
   const formatM = (m) => m >= 0 ? `+${m}` : `${m}`;
-  const buyStr = `${state.baseBuy.toFixed(2)}(${formatM(state.buyMarkup)})`;
-  const sellStr = `${state.baseSell.toFixed(2)}(${formatM(state.sellMarkup)})`;
-  
-  console.log(`\n  [ 回购 / Buyback ] :  ${buyStr}`);
-  console.log(`  [ 销售 / Sales ]   :  ${sellStr}\n`);
+  const sellStrDisp = `${state.baseBuy.toFixed(2)}(${formatM(state.buyMarkup)})`;
+  const buyStrDisp = `${state.baseSell.toFixed(2)}(${formatM(state.sellMarkup)})`;
+
+  console.log(`\n  [ 回购 / Sell ] :  ${sellStrDisp}`);
+  console.log(`  [ 销售 / Buy ]  :  ${buyStrDisp}\n`);
   console.log('=========================================');
   console.log('指令说明 (Commands):');
-  console.log('  buy <数值>  (例: "buy 5.5" 或 "buy -2")');
-  console.log('  sell <数值> (例: "sell 3.2")');
+  console.log('  buy <数值>  (例如调节 销售/Buy: "buy 5.5" 或 "buy -2")');
+  console.log('  sell <数值> (例如调节 回购/Sell: "sell 3.2")');
   console.log('  exit        (退出控制台)');
   console.log('=========================================');
   if (errorMsg) {
@@ -91,12 +91,12 @@ client.on('data', (data) => {
   buffer += data.toString();
   const msgs = buffer.split('\n');
   buffer = msgs.pop();
-  
+
   for (const msgString of msgs) {
     if (!msgString.trim()) continue;
     try {
       const msg = JSON.parse(msgString);
-      
+
       if (msg.type === 'AUTH_SUCCESS') {
         isConnected = true;
         renderDashboard();
@@ -110,11 +110,11 @@ client.on('data', (data) => {
         state.baseSell = msg.baseSell;
         state.buyMarkup = msg.buyMarkup;
         state.sellMarkup = msg.sellMarkup;
-        
+
         renderDashboard();
         rl.prompt(true);
       }
-    } catch(e) {}
+    } catch (e) { }
   }
 });
 
@@ -130,30 +130,34 @@ client.on('error', (e) => {
 
 rl.on('line', (line) => {
   const input = line.trim().toLowerCase();
-  
+
   if (input === 'exit' || input === 'quit') {
     console.clear();
     console.log('已退出 TCP 管理员控制台。\n');
     client.destroy();
     process.exit(0);
   }
-  
+
   const parts = input.split(' ');
   if (parts.length === 2) {
-    const type = parts[0];
+    const cmdType = parts[0];
     const val = parseFloat(parts[1]);
-    
-    if (!isNaN(val) && (type === 'buy' || type === 'sell')) {
-      const payload = { type: 'SET_MARKUP', [type]: val };
+
+    if (!isNaN(val) && (cmdType === 'buy' || cmdType === 'sell')) {
+      // Mapping consumer perspective to internal keys: 
+      // 'buy' cmd targets 'sell' markup
+      // 'sell' cmd targets 'buy' markup
+      const internalKey = cmdType === 'buy' ? 'sell' : 'buy';
+      const payload = { type: 'SET_MARKUP', [internalKey]: val };
       client.write(JSON.stringify(payload) + '\n');
-      return; 
+      return;
     } else {
       errorMsg = '格式错误! 请输入例如 "buy 5" 或 "sell -2"';
     }
   } else if (input !== '') {
     errorMsg = '未知指令 (输入 exit 退出)!';
   }
-  
+
   renderDashboard();
   rl.prompt();
 });

@@ -196,12 +196,12 @@ body {
 
 @keyframes flash-green {
   0% { color: var(--success); text-shadow: 0 0 40px var(--success); transform: scale(1.02); }
-  100% { color: inherit; text-shadow: none; transform: scale(1); }
+  100% { text-shadow: none; transform: scale(1); }
 }
 
 @keyframes flash-red {
   0% { color: var(--danger); text-shadow: 0 0 40px var(--danger); transform: scale(0.98); }
-  100% { color: inherit; text-shadow: none; transform: scale(1); }
+  100% { text-shadow: none; transform: scale(1); }
 }
 
 @keyframes pulse-anim {

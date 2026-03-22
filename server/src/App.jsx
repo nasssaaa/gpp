@@ -12,20 +12,20 @@ function App() {
   useEffect(() => {
     // Utilizing relative paths allows the browser to natively inherit the https:// protocol and host, completely bypassing Mixed Content blocks!
     let eventSource = new EventSource(`/events`);
-    
+
     eventSource.onopen = () => console.log('Connected to Markup SSE over relative origin.');
-    
+
     eventSource.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === 'MARKUP_UPDATE') {
-           setMarkups({ buy: msg.buy, sell: msg.sell });
+          setMarkups({ buy: msg.buy, sell: msg.sell });
         }
-      } catch(e) { console.error('SSE Parse error', e); }
+      } catch (e) { console.error('SSE Parse error', e); }
     };
 
     eventSource.onerror = () => console.log('Markup SSE connection lost.');
-    
+
     return () => { eventSource.close(); };
   }, []);
 
@@ -35,7 +35,7 @@ function App() {
       try {
         const response = await fetch('/api/res/quote/pq.json');
         const data = await response.json();
-        
+
         if (data && data.items) {
           const targetItem = data.items.find(item => item.code === "JZJ_au");
           if (targetItem) {
@@ -51,7 +51,7 @@ function App() {
       }
     };
 
-    fetchData(); 
+    fetchData();
     const intervalId = setInterval(fetchData, 500);
 
     return () => clearInterval(intervalId);
@@ -81,6 +81,33 @@ function App() {
     return parseFloat(basePrice) + (markupAmt || 0);
   };
 
+  const formatCurrentTime = () => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dow = days[d.getDay()] + '.';
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${yyyy}/${mm}/${dd} ${dow} ${hh}:${min}:${ss}`;
+  };
+
+  const getPriceColorStyle = () => {
+    if (!goldData) return {};
+    const open = goldData.open !== undefined ? goldData.open : goldData.openprice;
+    if (open === undefined) return {};
+    
+    const salesPrice = applyMarkup(goldData.askprice, markups.sell);
+    const openPrice = applyMarkup(open, markups.sell);
+    if (salesPrice > openPrice) return { color: 'var(--danger)' };
+    if (salesPrice < openPrice) return { color: 'var(--success)' };
+    return { color: '#ffffff' };
+  };
+
+  const priceStyle = getPriceColorStyle();
+
   return (
     <div className="dashboard">
       <header className="header-bar">
@@ -90,7 +117,7 @@ function App() {
         </div>
         <div className="status-indicator">
           <div className="pulse"></div>
-          {error ? '连接异常' : (goldData ? new Date().toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', weekday: 'long', hour12: false }) : '连接中...')}
+          {error ? '连接异常' : (goldData ? formatCurrentTime() : '连接中...')}
         </div>
       </header>
 
@@ -113,8 +140,8 @@ function App() {
             <thead>
               <tr>
                 <th>商品</th>
-                <th style={{ textAlign: 'right' }}>回购 (Buyback)</th>
-                <th style={{ textAlign: 'right' }}>销售 (Sales)</th>
+                <th style={{ textAlign: 'right' }}>回购 (Sell)</th>
+                <th style={{ textAlign: 'right' }}>销售 (Buy)</th>
                 <th style={{ textAlign: 'right' }}>高/低 (High/Low)</th>
               </tr>
             </thead>
@@ -122,19 +149,18 @@ function App() {
               <tr>
                 <td>
                   <div className="col-product">
-                    <span className="prod-name">{goldData.name || '黄金制品'}</span>
-                    <span className="prod-code">{goldData.code}</span>
+                    <span className="prod-name">{goldData.name || '黄金'}</span>
                   </div>
                 </td>
-                
+
                 <td style={{ textAlign: 'right' }}>
-                  <span className={`price-value ${getChangeClass(applyMarkup(goldData.bidprice, markups.buy), applyMarkup(prevData?.bidprice, markups.buy))}`} key={`buy-${goldData.bidprice}-${markups.buy}`}>
+                  <span className={`price-value ${getChangeClass(applyMarkup(goldData.bidprice, markups.buy), applyMarkup(prevData?.bidprice, markups.buy))}`} style={priceStyle} key={`buy-${goldData.bidprice}-${markups.buy}`}>
                     {applyMarkup(goldData.bidprice, markups.buy).toFixed(2)}
                   </span>
                 </td>
 
                 <td style={{ textAlign: 'right' }}>
-                  <span className={`price-value ${getChangeClass(applyMarkup(goldData.askprice, markups.sell), applyMarkup(prevData?.askprice, markups.sell))}`} key={`sell-${goldData.askprice}-${markups.sell}`}>
+                  <span className={`price-value ${getChangeClass(applyMarkup(goldData.askprice, markups.sell), applyMarkup(prevData?.askprice, markups.sell))}`} style={priceStyle} key={`sell-${goldData.askprice}-${markups.sell}`}>
                     {applyMarkup(goldData.askprice, markups.sell).toFixed(2)}
                   </span>
                 </td>
@@ -143,14 +169,14 @@ function App() {
                   <div className="high-low-group" style={{ alignItems: 'flex-end' }}>
                     <div className="hl-item">
                       <span className="hl-label">高</span>
-                      <span className={`hl-val high ${getChangeClass(goldData.high, prevData?.high)}`} key={`high-${goldData.high}`}>
-                        {parseFloat(goldData.high).toFixed(2)}
+                      <span className={`hl-val high ${getChangeClass(applyMarkup(goldData.high, markups.sell), applyMarkup(prevData?.high, markups.sell))}`} key={`high-${goldData.high}-${markups.sell}`}>
+                        {applyMarkup(goldData.high, markups.sell).toFixed(2)}
                       </span>
                     </div>
                     <div className="hl-item">
                       <span className="hl-label">低</span>
-                      <span className={`hl-val low ${getChangeClass(goldData.low, prevData?.low)}`} key={`low-${goldData.low}`}>
-                        {parseFloat(goldData.low).toFixed(2)}
+                      <span className={`hl-val low ${getChangeClass(applyMarkup(goldData.low, markups.sell), applyMarkup(prevData?.low, markups.sell))}`} key={`low-${goldData.low}-${markups.sell}`}>
+                        {applyMarkup(goldData.low, markups.sell).toFixed(2)}
                       </span>
                     </div>
                   </div>
