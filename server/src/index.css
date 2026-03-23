@@ -17,6 +17,10 @@
   padding: 0;
 }
 
+html, body {
+  max-width: 100%;
+}
+
 body {
   font-family: 'Outfit', -apple-system, sans-serif;
   background-color: var(--bg-color);
@@ -29,7 +33,7 @@ body {
 }
 
 .dashboard {
-  width: 100vw;
+  width: 100%;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -255,7 +259,8 @@ body {
     padding: 1rem 0.5rem; 
     font-size: 0.7rem; 
     letter-spacing: 1px; 
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-word;
     overflow: hidden;
   }
   
@@ -273,7 +278,7 @@ body {
   .hl-label { font-size: 0.8rem; width: 30px; }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 500px) {
   .price-value { font-size: 1.25rem; letter-spacing: 0; }
   .prod-name { font-size: 1rem; }
   .prod-code { font-size: 0.7rem; display: block; margin-top: 5px; }
