@@ -98,7 +98,7 @@ function App() {
     if (!goldData) return {};
     const open = goldData.open !== undefined ? goldData.open : goldData.openprice;
     if (open === undefined) return {};
-    
+
     const salesPrice = applyMarkup(goldData.askprice, markups.sell);
     const openPrice = applyMarkup(open, markups.sell);
     if (salesPrice > openPrice) return { color: 'var(--danger)' };
@@ -112,8 +112,8 @@ function App() {
     <div className="dashboard">
       <header className="header-bar">
         <div className="title-group">
-          <h1>金价实时报价</h1>
-          <p>Global Gold Market Live Terminal</p>
+          <h1>万泓贵金属</h1>
+          <p>Wang Hong Precious Metals</p>
         </div>
         <div className="status-indicator">
           <div className="pulse"></div>

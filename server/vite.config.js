@@ -7,6 +7,9 @@ const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'))
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  build: {
+    cssTarget: ['chrome61', 'edge18', 'firefox60', 'safari11', 'ios11']
+  },
   server: {
     port: 5175,
     allowedHosts: [
