@@ -3,12 +3,12 @@ import './index.css';
 
 // Product definitions (must match server)
 const PRODUCTS = [
-  { key: 'au',     name: '黄金',     code: 'JZJ_au' },
+  { key: 'au', name: '黄金', code: 'JZJ_au' },
   { key: 'au9999', name: '黄金9999', code: 'Au99.99' },
-  { key: 'autd',   name: '黄金T+D',  code: 'Au(T+D)' },
-  { key: 'ag',     name: '白银',     code: 'JZJ_ag' },
-  { key: 'pt',     name: '铂金',     code: 'JZJ_pt' },
-  { key: 'pd',     name: '钯金',     code: 'JZJ_pd' },
+  { key: 'autd', name: '黄金T+D', code: 'Au(T+D)' },
+  { key: 'ag', name: '白银', code: 'JZJ_ag' },
+  { key: 'pt', name: '铂金', code: 'JZJ_pt' },
+  { key: 'pd', name: '钯金', code: 'JZJ_pd' },
 ];
 
 function initMarkups() {
@@ -133,7 +133,6 @@ function App() {
       <header className="header-bar">
         <div className="title-group">
           <h1>万泓贵金属</h1>
-          <p>Wang Hong Precious Metals</p>
         </div>
         <div className="status-indicator">
           <div className="pulse"></div>
