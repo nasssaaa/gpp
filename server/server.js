@@ -15,8 +15,25 @@ const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'));
 const tcpPort = config.tcpPort || 8082;
 const httpPort = config.ssePort || 8081;
 
-let markups = { buy: 0, sell: 0 };
-let basePrices = { buy: 0, sell: 0 };
+// Product definitions
+const PRODUCTS = {
+  au:     { name: '黄金',     code: 'JZJ_au' },
+  au9999: { name: '黄金9999', code: 'Au99.99' },
+  autd:   { name: '黄金T+D',  code: 'Au(T+D)' },
+  ag:     { name: '白银',     code: 'JZJ_ag' },
+  pt:     { name: '铂金',     code: 'JZJ_pt' },
+  pd:     { name: '钯金',     code: 'JZJ_pd' },
+};
+
+const PRODUCT_KEYS = Object.keys(PRODUCTS);
+
+// Per-product markups and base prices
+let markups = {};
+let basePrices = {};
+for (const key of PRODUCT_KEYS) {
+  markups[key] = { buy: 0, sell: 0 };
+  basePrices[key] = { buy: 0, sell: 0 };
+}
 
 const pubFile = 'server.pub';
 const keyFile = 'server.key';
@@ -40,9 +57,19 @@ const dataFile = 'markups.json';
 if (fs.existsSync(dataFile)) {
   try {
     const saved = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-    markups.buy = saved.buy || 0;
-    markups.sell = saved.sell || 0;
-  } catch(e) { console.error('Failed to load markups.json'); }
+    // Support new per-product format
+    for (const key of PRODUCT_KEYS) {
+      if (saved[key]) {
+        markups[key].buy = saved[key].buy || 0;
+        markups[key].sell = saved[key].sell || 0;
+      }
+    }
+    // Backward compatibility: migrate old {buy, sell} format to 'au'
+    if (typeof saved.buy === 'number' && !saved.au) {
+      markups.au.buy = saved.buy;
+      markups.au.sell = saved.sell || 0;
+    }
+  } catch (e) { console.error('Failed to load markups.json'); }
 }
 
 function saveMarkups() {
@@ -53,13 +80,17 @@ const adminClients = new Set();
 const sseClients = new Set();
 
 function broadcastAdminState() {
-  const payload = JSON.stringify({
-    type: 'ADMIN_STATE',
-    baseBuy: basePrices.buy,
-    baseSell: basePrices.sell,
-    buyMarkup: markups.buy,
-    sellMarkup: markups.sell
-  }) + '\n';
+  const products = {};
+  for (const key of PRODUCT_KEYS) {
+    products[key] = {
+      name: PRODUCTS[key].name,
+      baseBuy: basePrices[key].buy,
+      baseSell: basePrices[key].sell,
+      buyMarkup: markups[key].buy,
+      sellMarkup: markups[key].sell,
+    };
+  }
+  const payload = JSON.stringify({ type: 'ADMIN_STATE', products }) + '\n';
   for (const client of adminClients) {
     if (client.isAuthenticatedAdmin && !client.destroyed) {
       client.write(payload);
@@ -68,7 +99,7 @@ function broadcastAdminState() {
 }
 
 function broadcastMarkupToWeb() {
-  const payloadJSON = JSON.stringify({ type: 'MARKUP_UPDATE', ...markups });
+  const payloadJSON = JSON.stringify({ type: 'MARKUP_UPDATE', markups });
   const streamData = `event: message\ndata: ${payloadJSON}\n\n`;
   for (const res of sseClients) {
     res.write(streamData);
@@ -101,7 +132,7 @@ app.get('/events', (req, res) => {
   });
   res.flushHeaders();
   sseClients.add(res);
-  res.write(`event: message\ndata: ${JSON.stringify({ type: 'MARKUP_UPDATE', ...markups })}\n\n`);
+  res.write(`event: message\ndata: ${JSON.stringify({ type: 'MARKUP_UPDATE', markups })}\n\n`);
   req.on('close', () => sseClients.delete(res));
 });
 
@@ -125,12 +156,12 @@ const tcpServer = net.createServer((socket) => {
     socket.buffer += data.toString();
     const msgs = socket.buffer.split('\n');
     socket.buffer = msgs.pop();
-    
+
     for (const msgString of msgs) {
       if (!msgString.trim()) continue;
       try {
         const msg = JSON.parse(msgString);
-        
+
         if (msg.type === 'AUTH') {
           try {
             const decrypted = crypto.privateDecrypt(privateKey, Buffer.from(msg.token, 'base64')).toString();
@@ -143,23 +174,28 @@ const tcpServer = net.createServer((socket) => {
               socket.write(JSON.stringify({ type: 'AUTH_FAIL', reason: '密钥不正确' }) + '\n');
               socket.destroy();
             }
-          } catch(e) {
+          } catch (e) {
             socket.write(JSON.stringify({ type: 'AUTH_FAIL', reason: '非对称加密解码失败，公钥不匹配' }) + '\n');
             socket.destroy();
           }
-        } 
+        }
         else if (msg.type === 'SET_MARKUP' && socket.isAuthenticatedAdmin) {
-          if (typeof msg.buy === 'number') markups.buy = msg.buy;
-          if (typeof msg.sell === 'number') markups.sell = msg.sell;
-          console.log(`[TCP Admin] Settings updated: Buy +${markups.buy}, Sell +${markups.sell}`);
-          
+          const productKey = msg.product;
+          if (!productKey || !PRODUCT_KEYS.includes(productKey)) {
+            socket.write(JSON.stringify({ type: 'ERROR', reason: `无效商品: ${productKey}，有效值: ${PRODUCT_KEYS.join(', ')}` }) + '\n');
+            continue;
+          }
+          if (typeof msg.buy === 'number') markups[productKey].buy = msg.buy;
+          if (typeof msg.sell === 'number') markups[productKey].sell = msg.sell;
+          console.log(`[TCP Admin] ${PRODUCTS[productKey].name} settings updated: Buy +${markups[productKey].buy}, Sell +${markups[productKey].sell}`);
+
           saveMarkups();
-          
+
           broadcastAdminState();
           broadcastMarkupToWeb();
         }
       } catch (e) {
-        console.error("Invalid TCP message format", e);
+        socket.destroy();
       }
     }
   });
@@ -177,13 +213,15 @@ setInterval(() => {
     res.on('end', () => {
       try {
         const json = JSON.parse(data);
-        const target = json.items.find(item => item.code === "JZJ_au");
-        if (target) {
-          basePrices.buy = parseFloat(target.bidprice);
-          basePrices.sell = parseFloat(target.askprice);
-          broadcastAdminState();
+        for (const key of PRODUCT_KEYS) {
+          const target = json.items.find(item => item.code === PRODUCTS[key].code);
+          if (target) {
+            basePrices[key].buy = parseFloat(target.bidprice);
+            basePrices[key].sell = parseFloat(target.askprice);
+          }
         }
-      } catch (e) {}
+        broadcastAdminState();
+      } catch (e) { }
     });
-  }).on('error', () => {});
+  }).on('error', () => { });
 }, 500);

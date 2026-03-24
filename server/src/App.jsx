@@ -1,16 +1,30 @@
 import { useState, useEffect, useRef } from 'react';
-import config from '../config.json';
 import './index.css';
 
+// Product definitions (must match server)
+const PRODUCTS = [
+  { key: 'au',     name: '黄金',     code: 'JZJ_au' },
+  { key: 'au9999', name: '黄金9999', code: 'Au99.99' },
+  { key: 'autd',   name: '黄金T+D',  code: 'Au(T+D)' },
+  { key: 'ag',     name: '白银',     code: 'JZJ_ag' },
+  { key: 'pt',     name: '铂金',     code: 'JZJ_pt' },
+  { key: 'pd',     name: '钯金',     code: 'JZJ_pd' },
+];
+
+function initMarkups() {
+  const m = {};
+  PRODUCTS.forEach(p => { m[p.key] = { buy: 0, sell: 0 }; });
+  return m;
+}
+
 function App() {
-  const [goldData, setGoldData] = useState(null);
+  const [productsData, setProductsData] = useState({});
   const [error, setError] = useState(null);
-  const [markups, setMarkups] = useState({ buy: 0, sell: 0 });
-  const prevDataRef = useRef(null);
+  const [markups, setMarkups] = useState(initMarkups);
+  const prevDataRef = useRef({});
 
   // SSE Connection for Markups
   useEffect(() => {
-    // Utilizing relative paths allows the browser to natively inherit the https:// protocol and host, completely bypassing Mixed Content blocks!
     let eventSource = new EventSource(`/events`);
 
     eventSource.onopen = () => console.log('Connected to Markup SSE over relative origin.');
@@ -18,8 +32,8 @@ function App() {
     eventSource.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'MARKUP_UPDATE') {
-          setMarkups({ buy: msg.buy, sell: msg.sell });
+        if (msg.type === 'MARKUP_UPDATE' && msg.markups) {
+          setMarkups(msg.markups);
         }
       } catch (e) { console.error('SSE Parse error', e); }
     };
@@ -37,12 +51,18 @@ function App() {
         const data = await response.json();
 
         if (data && data.items) {
-          const targetItem = data.items.find(item => item.code === "JZJ_au");
-          if (targetItem) {
-            setGoldData(targetItem);
+          const newData = {};
+          for (const product of PRODUCTS) {
+            const item = data.items.find(i => i.code === product.code);
+            if (item) {
+              newData[product.key] = item;
+            }
+          }
+          if (Object.keys(newData).length > 0) {
+            setProductsData(newData);
             setError(null);
           } else {
-            setError("未找到 JZJ_au 数据");
+            setError("未找到任何商品数据");
           }
         }
       } catch (err) {
@@ -59,10 +79,10 @@ function App() {
 
   // Animation Trackers
   useEffect(() => {
-    if (goldData) {
-      prevDataRef.current = goldData;
+    if (Object.keys(productsData).length > 0) {
+      prevDataRef.current = { ...productsData };
     }
-  }, [goldData]);
+  }, [productsData]);
 
   const prevData = prevDataRef.current;
 
@@ -94,19 +114,19 @@ function App() {
     return `${yyyy}/${mm}/${dd} ${dow} ${hh}:${min}:${ss}`;
   };
 
-  const getPriceColorStyle = () => {
-    if (!goldData) return {};
-    const open = goldData.open !== undefined ? goldData.open : goldData.openprice;
+  const getPriceColorStyle = (itemData, productMarkups) => {
+    if (!itemData) return {};
+    const open = itemData.open !== undefined ? itemData.open : itemData.openprice;
     if (open === undefined) return {};
 
-    const salesPrice = applyMarkup(goldData.askprice, markups.sell);
-    const openPrice = applyMarkup(open, markups.sell);
+    const salesPrice = applyMarkup(itemData.askprice, productMarkups?.sell || 0);
+    const openPrice = applyMarkup(open, productMarkups?.sell || 0);
     if (salesPrice > openPrice) return { color: 'var(--danger)' };
     if (salesPrice < openPrice) return { color: 'var(--success)' };
     return { color: '#ffffff' };
   };
 
-  const priceStyle = getPriceColorStyle();
+  const hasData = Object.keys(productsData).length > 0;
 
   return (
     <div className="dashboard">
@@ -117,7 +137,7 @@ function App() {
         </div>
         <div className="status-indicator">
           <div className="pulse"></div>
-          {error ? '连接异常' : (goldData ? formatCurrentTime() : '连接中...')}
+          {error ? '连接异常' : (hasData ? formatCurrentTime() : '连接中...')}
         </div>
       </header>
 
@@ -127,14 +147,14 @@ function App() {
         </div>
       )}
 
-      {!goldData && !error && (
+      {!hasData && !error && (
         <div className="center-message">
           <div className="spinner"></div>
           <div>正在接入交易市场数据...</div>
         </div>
       )}
 
-      {goldData && (
+      {hasData && (
         <main className="table-container">
           <table className="data-table">
             <thead>
@@ -146,42 +166,53 @@ function App() {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>
-                  <div className="col-product">
-                    <span className="prod-name">{goldData.name || '黄金'}</span>
-                  </div>
-                </td>
+              {PRODUCTS.map((product) => {
+                const itemData = productsData[product.key];
+                const prevItem = prevData[product.key];
+                const productMarkups = markups[product.key] || { buy: 0, sell: 0 };
+                const priceStyle = getPriceColorStyle(itemData, productMarkups);
 
-                <td style={{ textAlign: 'right' }}>
-                  <span className={`price-value ${getChangeClass(applyMarkup(goldData.bidprice, markups.buy), applyMarkup(prevData?.bidprice, markups.buy))}`} style={priceStyle} key={`buy-${goldData.bidprice}-${markups.buy}`}>
-                    {applyMarkup(goldData.bidprice, markups.buy).toFixed(2)}
-                  </span>
-                </td>
+                if (!itemData) return null;
 
-                <td style={{ textAlign: 'right' }}>
-                  <span className={`price-value ${getChangeClass(applyMarkup(goldData.askprice, markups.sell), applyMarkup(prevData?.askprice, markups.sell))}`} style={priceStyle} key={`sell-${goldData.askprice}-${markups.sell}`}>
-                    {applyMarkup(goldData.askprice, markups.sell).toFixed(2)}
-                  </span>
-                </td>
+                return (
+                  <tr key={product.key}>
+                    <td>
+                      <div className="col-product">
+                        <span className="prod-name">{product.name}</span>
+                      </div>
+                    </td>
 
-                <td style={{ textAlign: 'right' }}>
-                  <div className="high-low-group" style={{ alignItems: 'flex-end' }}>
-                    <div className="hl-item">
-                      <span className="hl-label">高</span>
-                      <span className={`hl-val high ${getChangeClass(applyMarkup(goldData.high, markups.sell), applyMarkup(prevData?.high, markups.sell))}`} key={`high-${goldData.high}-${markups.sell}`}>
-                        {applyMarkup(goldData.high, markups.sell).toFixed(2)}
+                    <td style={{ textAlign: 'right' }}>
+                      <span className={`price-value ${getChangeClass(applyMarkup(itemData.bidprice, productMarkups.buy), applyMarkup(prevItem?.bidprice, productMarkups.buy))}`} style={priceStyle} key={`buy-${product.key}-${itemData.bidprice}-${productMarkups.buy}`}>
+                        {applyMarkup(itemData.bidprice, productMarkups.buy).toFixed(2)}
                       </span>
-                    </div>
-                    <div className="hl-item">
-                      <span className="hl-label">低</span>
-                      <span className={`hl-val low ${getChangeClass(applyMarkup(goldData.low, markups.sell), applyMarkup(prevData?.low, markups.sell))}`} key={`low-${goldData.low}-${markups.sell}`}>
-                        {applyMarkup(goldData.low, markups.sell).toFixed(2)}
+                    </td>
+
+                    <td style={{ textAlign: 'right' }}>
+                      <span className={`price-value ${getChangeClass(applyMarkup(itemData.askprice, productMarkups.sell), applyMarkup(prevItem?.askprice, productMarkups.sell))}`} style={priceStyle} key={`sell-${product.key}-${itemData.askprice}-${productMarkups.sell}`}>
+                        {applyMarkup(itemData.askprice, productMarkups.sell).toFixed(2)}
                       </span>
-                    </div>
-                  </div>
-                </td>
-              </tr>
+                    </td>
+
+                    <td style={{ textAlign: 'right' }}>
+                      <div className="high-low-group" style={{ alignItems: 'flex-end' }}>
+                        <div className="hl-item">
+                          <span className="hl-label">高</span>
+                          <span className={`hl-val high ${getChangeClass(applyMarkup(itemData.high, productMarkups.sell), applyMarkup(prevItem?.high, productMarkups.sell))}`} key={`high-${product.key}-${itemData.high}-${productMarkups.sell}`}>
+                            {applyMarkup(itemData.high, productMarkups.sell).toFixed(2)}
+                          </span>
+                        </div>
+                        <div className="hl-item">
+                          <span className="hl-label">低</span>
+                          <span className={`hl-val low ${getChangeClass(applyMarkup(itemData.low, productMarkups.sell), applyMarkup(prevItem?.low, productMarkups.sell))}`} key={`low-${product.key}-${itemData.low}-${productMarkups.sell}`}>
+                            {applyMarkup(itemData.low, productMarkups.sell).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </main>
