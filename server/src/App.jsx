@@ -3,9 +3,9 @@ import './index.css';
 
 // Product definitions (must match server)
 const PRODUCTS = [
-  { key: 'au', name: '黄金', code: 'JZJ_au' },
   { key: 'au9999', name: '黄金9999', code: 'Au99.99' },
   { key: 'autd', name: '黄金T+D', code: 'Au(T+D)' },
+  { key: 'au', name: '黄金', code: 'JZJ_au' },
   { key: 'ag', name: '白银', code: 'JZJ_ag' },
   { key: 'pt', name: '铂金', code: 'JZJ_pt' },
   { key: 'pd', name: '钯金', code: 'JZJ_pd' },
