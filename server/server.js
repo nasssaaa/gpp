@@ -17,12 +17,12 @@ const httpPort = config.ssePort || 8081;
 
 // Product definitions
 const PRODUCTS = {
-  au:     { name: '黄金',     code: 'JZJ_au' },
+  au: { name: '黄金', code: 'JZJ_au' },
   au9999: { name: '黄金9999', code: 'Au99.99' },
-  autd:   { name: '黄金T+D',  code: 'Au(T+D)' },
-  ag:     { name: '白银',     code: 'JZJ_ag' },
-  pt:     { name: '铂金',     code: 'JZJ_pt' },
-  pd:     { name: '钯金',     code: 'JZJ_pd' },
+  autd: { name: '黄金T+D', code: 'Au(T+D)' },
+  ag: { name: '白银', code: 'JZJ_ag' },
+  pt: { name: '铂金', code: 'JZJ_pt' },
+  pd: { name: '钯金', code: 'JZJ_pd' },
 };
 
 const PRODUCT_KEYS = Object.keys(PRODUCTS);
@@ -109,10 +109,16 @@ function broadcastMarkupToWeb() {
 // 1. HTTP Server for Browser SSE Stream + Static Files + API Proxy
 const app = express();
 
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 100, // 允许同时保持 100 个长连接
+});
+
 // A. Proxy /api requests
 app.use('/api', createProxyMiddleware({
   target: 'https://i.jzj9999.com',
   changeOrigin: true,
+  agent: httpsAgent,
   pathRewrite: { '^/api': '' },
   onProxyReq: (proxyReq) => {
     proxyReq.setHeader('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
